@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Magical Christmas Tree | Mobile Optimized</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magical Christmas Tree | Creative Tech Demo</title>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,7 +23,6 @@
             font-family: 'Times New Roman', serif;
             color: var(--gold);
             user-select: none;
-            -webkit-tap-highlight-color: transparent; /* Mobile fix */
         }
 
         /* UI Overlay */
@@ -46,45 +45,43 @@
         /* Header */
         h1 {
             font-family: 'Cinzel', serif;
-            font-size: clamp(32px, 8vw, 56px); /* Responsive font size */
+            font-size: 56px;
             text-align: center;
             margin-top: 40px;
             background: linear-gradient(to bottom, #ffffff, var(--gold));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             filter: drop-shadow(0 0 15px rgba(212, 175, 55, 0.5));
-            letter-spacing: 2px;
-            padding: 0 10px;
+            letter-spacing: 4px;
         }
 
         /* Upload Controls */
         .upload-wrapper {
             position: absolute;
-            bottom: 40px;
+            bottom: 60px;
             left: 50%;
             transform: translateX(-50%);
             text-align: center;
             pointer-events: auto;
-            width: 100%;
         }
 
         .btn-upload {
-            background: rgba(20, 20, 20, 0.6);
+            background: rgba(20, 20, 20, 0.4);
             border: 1px solid var(--gold);
             color: var(--gold);
-            padding: 12px 25px;
+            padding: 12px 30px;
             font-family: 'Cinzel', serif;
-            font-size: 14px;
+            font-size: 16px;
             cursor: pointer;
             backdrop-filter: blur(10px);
             transition: all 0.3s ease;
             text-transform: uppercase;
             letter-spacing: 2px;
-            border-radius: 25px; /* Softer for mobile */
         }
 
-        .btn-upload:active {
-            background: rgba(212, 175, 55, 0.4);
+        .btn-upload:hover {
+            background: rgba(212, 175, 55, 0.2);
+            box-shadow: 0 0 20px rgba(212, 175, 55, 0.4);
         }
 
         .hint-text {
@@ -131,7 +128,11 @@
 
         /* Hidden CV Elements */
         #cv-debug {
-            display: none; /* Hide completely on mobile to save performance */
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            opacity: 0; 
+            pointer-events: none;
         }
     </style>
 
@@ -156,14 +157,15 @@
         <h1>Merry Christmas</h1>
         
         <div class="upload-wrapper">
-            <button class="btn-upload" onclick="document.getElementById('file-input').click()">Thêm Ảnh Kỷ Niệm</button>
+            <button class="btn-upload" onclick="document.getElementById('file-input').click()">Add Memories</button>
             <input type="file" id="file-input" accept="image/*" style="display: none;">
-            <div class="hint-text">Chạm vào màn hình để tương tác</div>
+            <div class="hint-text">Press 'H' to Hide Controls</div>
         </div>
     </div>
 
     <div id="cv-debug">
         <video id="webcam" style="width: 160px; height: 120px;" autoplay playsinline></video>
+        <canvas id="cv-canvas" width="160" height="120"></canvas>
     </div>
 
     <script type="module">
@@ -175,20 +177,14 @@
         import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-        // --- MOBILE DETECTION & CONFIG ---
-        const isMobile = window.innerWidth < 768;
-        
+        // --- Configuration & State ---
         const CONFIG = {
             colors: { gold: 0xd4af37, cream: 0xfceea7, red: 0xaa0000, green: 0x003300 },
-            // Reduce particles drastically for mobile
-            counts: { 
-                main: isMobile ? 400 : 1500, 
-                dust: isMobile ? 500 : 2500 
-            }
+            counts: { main: 1500, dust: 2500 }
         };
 
         const STATE = {
-            mode: 'TREE',
+            mode: 'TREE', // TREE, SCATTER, FOCUS
             focusTarget: null,
             rotationOffset: { x: 0, y: 0 },
             isPlaying: true
@@ -204,46 +200,33 @@
                 this.lastVideoTime = -1;
                 this.onGesture = onGesture;
                 this.handLandmarker = null;
-                this.isReady = false;
             }
 
             async init() {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+                );
+                
+                this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+
                 try {
-                    const vision = await FilesetResolver.forVisionTasks(
-                        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-                    );
-                    
-                    this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                        baseOptions: {
-                            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                            delegate: "GPU" // Or "CPU" if mobile crashes
-                        },
-                        runningMode: "VIDEO",
-                        numHands: 1
-                    });
-
-                    // Mobile Camera Constraints
-                    const constraints = { 
-                        video: { 
-                            facingMode: "user", // Prefer front camera
-                            width: { ideal: 320 }, // Low res for performance
-                            height: { ideal: 240 }
-                        } 
-                    };
-
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                     this.video.srcObject = stream;
                     await new Promise(r => this.video.onloadedmetadata = r);
-                    this.isReady = true;
-                    this.predict();
-                    console.log("Vision System Ready");
                 } catch (e) {
-                    console.warn("Vision/Camera failed or denied. Running in visual-only mode.", e);
+                    console.warn("Webcam access denied. Interaction disabled.");
                 }
             }
 
             predict() {
-                if (!this.isReady || !this.handLandmarker || this.video.paused) return;
+                if (!this.handLandmarker || this.video.paused) return;
 
                 if (this.video.currentTime !== this.lastVideoTime) {
                     this.lastVideoTime = this.video.currentTime;
@@ -262,7 +245,7 @@
                 const wrist = landmarks[0];
                 const center = landmarks[9];
 
-                // 1. Scene Rotation Mapping
+                // 1. Scene Rotation Mapping (Landmark 9)
                 const normX = (center.x - 0.5) * 2; 
                 const normY = (center.y - 0.5) * 2;
                 STATE.rotationOffset.y = normX * 1.5;
@@ -321,21 +304,36 @@
             }
 
             createGeometries() {
-                // Simplified Cane for Mobile
+                // Procedural Candy Cane
                 const path = new THREE.CatmullRomCurve3([
                     new THREE.Vector3(0, -1, 0),
                     new THREE.Vector3(0, 1, 0),
                     new THREE.Vector3(0.5, 1.5, 0),
                     new THREE.Vector3(1, 1.2, 0)
                 ]);
-                const caneGeo = new THREE.TubeGeometry(path, 12, 0.1, 6, false); // Reduced detail
+                const caneGeo = new THREE.TubeGeometry(path, 20, 0.1, 8, false);
                 
-                // Simple color material for cane instead of heavy texture for mobile performance
-                const caneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+                // Texture for Cane
+                const canvas = document.createElement('canvas');
+                canvas.width = 128; canvas.height = 128;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,128,128);
+                ctx.fillStyle = '#aa0000';
+                for(let i=0; i<10; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(-50 + i*30, 0);
+                    ctx.lineTo(0 + i*30, 128);
+                    ctx.lineTo(20 + i*30, 128);
+                    ctx.lineTo(-30 + i*30, 0);
+                    ctx.fill();
+                }
+                const caneTex = new THREE.CanvasTexture(canvas);
+                caneTex.wrapS = caneTex.wrapT = THREE.RepeatWrapping;
+                const caneMat = new THREE.MeshStandardMaterial({ map: caneTex, roughness: 0.5 });
 
                 return {
                     box: new THREE.BoxGeometry(0.5, 0.5, 0.5),
-                    sphere: new THREE.SphereGeometry(0.3, 8, 8), // Reduced Segments
+                    sphere: new THREE.SphereGeometry(0.3, 16, 16),
                     cane: caneGeo,
                     caneMat: caneMat
                 };
@@ -375,11 +373,8 @@
             }
 
             addParticleData(mesh, type) {
-                // Only cast shadows on PC or high-end mobile (disabled here for general mobile safety)
-                if (!isMobile) {
-                    mesh.castShadow = true;
-                    mesh.receiveShadow = true;
-                }
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
                 
                 mesh.position.set((Math.random()-0.5)*50, (Math.random()-0.5)*50, (Math.random()-0.5)*50);
                 mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, 0);
@@ -398,23 +393,22 @@
             }
 
             initDefaultPhoto() {
-                // Using a reliable placeholder if the custom URL fails
+                // FIXED: URL spaces removed for valid loading
                 const customImageURL = 'https://scontent.fhan14-3.fna.fbcdn.net/v/t39.30808-1/589770246_1373786944093717_7204443009491259241_n.jpg?stp=cp6_dst-jpg_s160x160_tt6&_nc_cat=110&ccb=1-7&_nc_sid=e99d92&_nc_ohc=BF2ZXOrL-mUQ7kNvwEi_U45&_nc_oc=Adn4BWpDPPLBlYEeKepOlVHf4M_Yvsm23YonMHt_M0D97-O-uBKDkN9uqgqF7M_Y0KA&_nc_zt=24&_nc_ht=scontent.fhan14-3.fna&_nc_gid=cCXdPb8OAQFmwBItadeOHw&oh=00_AfnEnLPrsHXP2f4k1dBXgLBhqDnsTxf-6DYvEFSbwstabw&oe=695022F8';
 
-                const loader = new THREE.TextureLoader();
-                loader.crossOrigin = 'anonymous';
-                
-                loader.load(customImageURL, 
-                    (texture) => {
+                if (customImageURL && customImageURL.trim() !== '') {
+                    const loader = new THREE.TextureLoader();
+                    loader.crossOrigin = 'anonymous'; // Important for CDN images
+                    loader.load(customImageURL, (texture) => {
                         texture.colorSpace = THREE.SRGBColorSpace;
                         this.addPhotoToScene(texture);
-                    }, 
-                    undefined, 
-                    (err) => {
-                        // Fail silently and load text
+                    }, undefined, (err) => {
+                        console.error("Image failed to load, falling back to text.", err);
                         this.createDefaultTextPhoto();
-                    }
-                );
+                    });
+                } else {
+                    this.createDefaultTextPhoto();
+                }
             }
 
             createDefaultTextPhoto() {
@@ -423,8 +417,8 @@
                 const ctx = canvas.getContext('2d');
                 ctx.fillStyle = '#fff'; ctx.fillRect(0,0,512,512);
                 ctx.fillStyle = '#000'; ctx.font = 'bold 60px Cinzel'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText('HOANG', 256, 200);
-                ctx.fillText('NAM', 256, 280);
+                ctx.fillText('JOYEUX', 256, 200);
+                ctx.fillText('NOEL', 256, 280);
                 
                 const texture = new THREE.CanvasTexture(canvas);
                 texture.colorSpace = THREE.SRGBColorSpace;
@@ -433,11 +427,13 @@
 
             addPhotoToScene(texture) {
                 const group = new THREE.Group();
-                const picGeo = new THREE.BoxGeometry(3, 3, 0.1);
+                
+                // Photo Frame Scale
+                const picGeo = new THREE.BoxGeometry(3, 3, 0.1); // Adjusted for square image
                 const picMat = new THREE.MeshBasicMaterial({ map: texture });
                 const picMesh = new THREE.Mesh(picGeo, picMat);
                 
-                const frameGeo = new THREE.BoxGeometry(3.2, 3.2, 0.08);
+                const frameGeo = new THREE.BoxGeometry(3.2, 3.2, 0.08); // Adjusted for square image
                 const frameMesh = new THREE.Mesh(frameGeo, this.materials.frame);
                 frameMesh.position.z = -0.02;
 
@@ -502,13 +498,8 @@
                     }
                 });
 
-                // Auto rotate on mobile touch drag could be added here, but simple Gyro/Auto is better
-                if (isMobile) {
-                   this.mainGroup.rotation.y += 0.005; // Auto rotate slightly on mobile
-                } else {
-                   this.mainGroup.rotation.y = THREE.MathUtils.lerp(this.mainGroup.rotation.y, STATE.rotationOffset.y, 0.1);
-                   this.mainGroup.rotation.x = THREE.MathUtils.lerp(this.mainGroup.rotation.x, STATE.rotationOffset.x, 0.1);
-                }
+                this.mainGroup.rotation.y = THREE.MathUtils.lerp(this.mainGroup.rotation.y, STATE.rotationOffset.y, 0.1);
+                this.mainGroup.rotation.x = THREE.MathUtils.lerp(this.mainGroup.rotation.x, STATE.rotationOffset.x, 0.1);
             }
         }
 
@@ -524,17 +515,17 @@
             }
 
             initThree() {
-                this.renderer = new THREE.WebGLRenderer({ antialias: !isMobile }); // Disable AA on mobile for speed
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
-                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+                this.renderer.setPixelRatio(window.devicePixelRatio);
                 this.renderer.toneMapping = THREE.ReinhardToneMapping;
                 this.renderer.toneMappingExposure = 2.2;
-                if (!isMobile) this.renderer.shadowMap.enabled = true; // Disable shadows on mobile
+                this.renderer.shadowMap.enabled = true;
                 document.body.appendChild(this.renderer.domElement);
 
                 this.scene = new THREE.Scene();
                 this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-                this.camera.position.set(0, 2, 50); // Move camera back slightly
+                this.camera.position.set(0, 2, 50);
 
                 const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
                 this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -550,7 +541,7 @@
                 spotGold.position.set(30, 40, 40);
                 spotGold.angle = 0.5;
                 spotGold.penumbra = 0.5;
-                if (!isMobile) spotGold.castShadow = true;
+                spotGold.castShadow = true;
                 this.scene.add(spotGold);
 
                 const spotBlue = new THREE.SpotLight(0x0044ff, 600);
@@ -562,9 +553,8 @@
                 const renderPass = new RenderPass(this.scene, this.camera);
                 this.composer.addPass(renderPass);
 
-                // Bloom is heavy, reduce quality slightly or keep defaults
                 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
-                bloomPass.strength = isMobile ? 0.3 : 0.45; // Reduce bloom strength on mobile
+                bloomPass.strength = 0.45;
                 bloomPass.radius = 0.4;
                 bloomPass.threshold = 0.7;
                 this.composer.addPass(bloomPass);
@@ -581,11 +571,11 @@
             }
 
             setupInputs() {
-                // Mobile Touch Interaction
-                document.addEventListener('touchstart', (e) => {
-                    this.handleGesture('FOCUS'); // Tap to focus
-                    setTimeout(() => this.handleGesture('TREE'), 3000); // Back to tree after 3s
-                }, {passive: true});
+                window.addEventListener('keydown', (e) => {
+                    if(e.key.toLowerCase() === 'h') {
+                        document.getElementById('ui-container').classList.toggle('ui-hidden');
+                    }
+                });
 
                 const input = document.getElementById('file-input');
                 input.addEventListener('change', (e) => {
@@ -619,17 +609,13 @@
                 }
             }
 
-            start() {
-                // 1. Remove Loader IMMEDIATELY (Don't wait for AI)
+            async start() {
+                await this.vision.init();
                 const loader = document.getElementById('loader');
                 loader.style.opacity = '0';
                 setTimeout(() => loader.remove(), 800);
-
-                // 2. Start Animation Loop
+                this.vision.predict();
                 this.animate();
-
-                // 3. Load AI in background (Non-blocking)
-                this.vision.init();
             }
 
             animate() {
